@@ -1,7 +1,17 @@
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class Main {
+    public static synchronized void closeSocket(Socket socket) {
+        try {
+            if (!socket.isClosed()) socket.close();
+        } catch (Throwable t){
+            System.out.println(t);
+        }
+    }
+
     public static void main(String[] args) throws Throwable{
         final ServerSocket serverSocket = new ServerSocket();
         final AtomicBoolean isRunning = new AtomicBoolean(true);
@@ -11,7 +21,6 @@ public class Main {
                 try{
                     isRunning.set(false);
                     serverSocket.close();
-                    //System.exit(0);
                 }catch (Throwable t) {
                     System.out.println(t);
                 }
@@ -38,22 +47,43 @@ public class Main {
             new Thread(() -> {
                 try{
                     Socket externalSocket = new Socket(externalAddress, externalPort);
+                    final AtomicBoolean mayClose = new AtomicBoolean(false);
                     new Thread(()->{
-                        try{
-                            clientSocket.getInputStream().transferTo(externalSocket.getOutputStream());
-                        } catch (Throwable t) {
+                        try (InputStream is = clientSocket.getInputStream()){
+                            is.transferTo(externalSocket.getOutputStream());
+                            closeSocket(externalSocket);
+                            closeSocket(clientSocket);
+                        }
+                        catch (SocketException e){
+                            System.out.println("Socket closed");
+                        }
+                        catch (Throwable t) {
                             System.out.println(t);
+                        } finally {
+                            closeSocket(externalSocket);
+                            closeSocket(clientSocket);
+                            mayClose.set(true);
                         }
                     }).start();
                     new Thread(()->{
-                        try{
-                            externalSocket.getInputStream().transferTo(clientSocket.getOutputStream());
-                        } catch (Throwable t) {
+                        try(InputStream is = externalSocket.getInputStream()){
+                            is.transferTo(clientSocket.getOutputStream());
+                        }
+                        catch (SocketException e){
+                            System.out.println("Socket closed");
+                        }
+                        catch (Throwable t) {
                             System.out.println(t);
+                        } finally {
+                            closeSocket(externalSocket);
+                            closeSocket(clientSocket);
+                            mayClose.set(true);
                         }
                     }).start();
 
-
+                    while (!mayClose.get()) Thread.sleep(500);
+                    closeSocket(clientSocket);
+                    closeSocket(externalSocket);
                 } catch (Throwable t){
                     System.out.println(t);
                 }
